@@ -27,6 +27,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <inttypes.h>
 
@@ -42,10 +43,10 @@ const char * iptos2str(int iptos);
  * Definitions for IP type of service (ip_tos)
  */
 
-#if HAVE_NETINET_IN_SYSTM_H
+#ifdef HAVE_NETINET_IN_SYSTM_H
 #include <netinet/in_systm.h>
 #endif
-#if HAVE_NETINET_IP_H
+#ifdef HAVE_NETINET_IP_H
 #include <netinet/ip.h>
 #endif
 
@@ -135,10 +136,11 @@ parse_qos(const char *cp)
 			return ipqos[i].value;
 	}
 	/* Try parsing as an integer */
+    /* Max DSCP value is 2**6 - 1 */
 	val = strtol(cp, &ep, 0);
-	if (*cp == '\0' || *ep != '\0' || val < 0 || val > 255)
+	if (*cp == '\0' || *ep != '\0' || val < 0 || val > 63)
 		return -1;
-	return val;
+	return val << 2;
 }
 
 const char *

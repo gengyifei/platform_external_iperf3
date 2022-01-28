@@ -24,4 +24,27 @@
  * This code is distributed under a BSD style license, see the LICENSE
  * file for complete information.
  */
-#define IPERF_VERSION "3.10.1+"
+#ifndef        IPERF_DCCP_H
+#define        IPERF_DCCP_H
+
+#ifndef        SOL_DCCP
+#define        SOL_DCCP 269
+#endif
+
+#ifndef        DCCP_SOCKOPT_MULTIPATH
+#define        DCCP_SOCKOPT_MULTIPATH 18
+#endif
+
+int iperf_dccp_accept(struct iperf_test *);
+
+int iperf_dccp_recv(struct iperf_stream *);
+
+int iperf_dccp_send(struct iperf_stream *);
+
+int iperf_dccp_listen(struct iperf_test *);
+
+int iperf_dccp_connect(struct iperf_test *);
+
+int iperf_dccp_init(struct iperf_test *test);
+
+#endif

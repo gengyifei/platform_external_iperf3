@@ -1,5 +1,5 @@
 /*
- * iperf, Copyright (c) 2014-2018, The Regents of the University of
+ * iperf, Copyright (c) 2014-2020, The Regents of the University of
  * California, through Lawrence Berkeley National Laboratory (subject
  * to receipt of any required approvals from the U.S. Dept. of
  * Energy).  All rights reserved.
@@ -35,6 +35,8 @@
 #define _WITH_GETLINE
 #include <stdio.h>
 #include <termios.h>
+#include <inttypes.h>
+#include <stdint.h>
 
 #if defined(HAVE_SSL)
 
@@ -43,6 +45,9 @@
 #include <openssl/pem.h>
 #include <openssl/sha.h>
 #include <openssl/buffer.h>
+#include <openssl/err.h>
+
+const char *auth_text_format = "user: %s\npwd:  %s\nts:   %"PRId64;
 
 void sha256(const char *string, char outputBuffer[65])
 {
@@ -59,10 +64,10 @@ void sha256(const char *string, char outputBuffer[65])
     outputBuffer[64] = 0;
 }
 
-int check_authentication(const char *username, const char *password, const time_t ts, const char *filename){
+int check_authentication(const char *username, const char *password, const time_t ts, const char *filename, int skew_threshold){
     time_t t = time(NULL);
     time_t utc_seconds = mktime(localtime(&t));
-    if ( (utc_seconds - ts) > 10 || (utc_seconds - ts) < -10 ) {
+    if ( (utc_seconds - ts) > skew_threshold || (utc_seconds - ts) < -skew_threshold ) {
         return 1;
     }
 
@@ -95,6 +100,7 @@ int check_authentication(const char *username, const char *password, const time_
         s_username = strtok(buf, ",");
         s_password = strtok(NULL, ",");
         if (strcmp( username, s_username ) == 0 && strcmp( passwordHash, s_password ) == 0){
+            fclose(ptr_file);
             return 0;
         }
     }
@@ -115,11 +121,9 @@ int Base64Encode(const unsigned char* buffer, const size_t length, char** b64tex
     BIO_write(bio, buffer, length);
     BIO_flush(bio);
     BIO_get_mem_ptr(bio, &bufferPtr);
-    BIO_set_close(bio, BIO_NOCLOSE);
+    *b64text = strndup( (*bufferPtr).data, (*bufferPtr).length );
     BIO_free_all(bio);
 
-    *b64text=(*bufferPtr).data;
-    (*b64text)[(*bufferPtr).length] = '\0';
     return (0); //success
 }
 
@@ -152,17 +156,18 @@ int Base64Decode(const char* b64message, unsigned char** buffer, size_t* length)
     return (0); //success
 }
 
-
 EVP_PKEY *load_pubkey_from_file(const char *file) {
     BIO *key = NULL;
     EVP_PKEY *pkey = NULL;
 
-    key = BIO_new_file(file, "r");
-    pkey = PEM_read_bio_PUBKEY(key, NULL, NULL, NULL);
+    if (file) {
+      key = BIO_new_file(file, "r");
+      pkey = PEM_read_bio_PUBKEY(key, NULL, NULL, NULL);
 
-    BIO_free(key);
+      BIO_free(key);
+    }
     return (pkey);
-}   
+}
 
 EVP_PKEY *load_pubkey_from_base64(const char *buffer) {
     unsigned char *key = NULL;
@@ -171,7 +176,9 @@ EVP_PKEY *load_pubkey_from_base64(const char *buffer) {
 
     BIO* bio = BIO_new(BIO_s_mem());
     BIO_write(bio, key, key_len);
+    free(key);
     EVP_PKEY *pkey = PEM_read_bio_PUBKEY(bio, NULL, NULL, NULL);
+    BIO_free(bio);
     return (pkey);
 }
 
@@ -179,13 +186,27 @@ EVP_PKEY *load_privkey_from_file(const char *file) {
     BIO *key = NULL;
     EVP_PKEY *pkey = NULL;
 
-    key = BIO_new_file(file, "r");
-    pkey = PEM_read_bio_PrivateKey(key, NULL, NULL, NULL);
+    if (file) {
+      key = BIO_new_file(file, "r");
+      pkey = PEM_read_bio_PrivateKey(key, NULL, NULL, NULL);
 
-    BIO_free(key);
+      BIO_free(key);
+    }
     return (pkey);
 }
 
+EVP_PKEY *load_privkey_from_base64(const char *buffer) {
+    unsigned char *key = NULL;
+    size_t key_len;
+    Base64Decode(buffer, &key, &key_len);
+
+    BIO* bio = BIO_new(BIO_s_mem());
+    BIO_write(bio, key, key_len);
+    free(key);
+    EVP_PKEY *pkey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL);
+    BIO_free(bio);
+    return (pkey);
+}
 
 int test_load_pubkey_from_file(const char *file){
     EVP_PKEY *key = load_pubkey_from_file(file);
@@ -222,16 +243,21 @@ int encrypt_rsa_message(const char *plaintext, EVP_PKEY *public_key, unsigned ch
 
     RSA_free(rsa);
     OPENSSL_free(rsa_buffer);
-    OPENSSL_free(bioBuff);  
+    BIO_free(bioBuff);
 
-    return encryptedtext_len;  
+    if (encryptedtext_len < 0) {
+      /* We probably shouldn't be printing stuff like this */
+      fprintf(stderr, "%s\n", ERR_error_string(ERR_get_error(), NULL));
+    }
+
+    return encryptedtext_len;
 }
 
 int decrypt_rsa_message(const unsigned char *encryptedtext, const int encryptedtext_len, EVP_PKEY *private_key, unsigned char **plaintext) {
     RSA *rsa = NULL;
     unsigned char *rsa_buffer = NULL, pad = RSA_PKCS1_PADDING;
     int plaintext_len, rsa_buffer_len, keysize;
-    
+
     rsa = EVP_PKEY_get1_RSA(private_key);
 
     keysize = RSA_size(rsa);
@@ -244,7 +270,12 @@ int decrypt_rsa_message(const unsigned char *encryptedtext, const int encryptedt
 
     RSA_free(rsa);
     OPENSSL_free(rsa_buffer);
-    OPENSSL_free(bioBuff);   
+    BIO_free(bioBuff);
+
+    if (plaintext_len < 0) {
+      /* We probably shouldn't be printing stuff like this */
+      fprintf(stderr, "%s\n", ERR_error_string(ERR_get_error(), NULL));
+    }
 
     return plaintext_len;
 }
@@ -252,35 +283,72 @@ int decrypt_rsa_message(const unsigned char *encryptedtext, const int encryptedt
 int encode_auth_setting(const char *username, const char *password, EVP_PKEY *public_key, char **authtoken){
     time_t t = time(NULL);
     time_t utc_seconds = mktime(localtime(&t));
-    char text[150];
-    sprintf (text, "user: %s\npwd:  %s\nts:   %ld", username, password, utc_seconds);
+
+    /*
+     * Compute a pessimistic/conservative estimate of storage required.
+     * It's OK to allocate too much storage but too little is bad.
+     */
+    const int text_len = strlen(auth_text_format) + strlen(username) + strlen(password) + 32;
+    char *text = (char *) calloc(text_len, sizeof(char));
+    if (text == NULL) {
+	return -1;
+    }
+    snprintf(text, text_len, auth_text_format, username, password, (int64_t)utc_seconds);
+
     unsigned char *encrypted = NULL;
     int encrypted_len;
     encrypted_len = encrypt_rsa_message(text, public_key, &encrypted);
+    free(text);
+    if (encrypted_len < 0) {
+      return -1;
+    }
     Base64Encode(encrypted, encrypted_len, authtoken);
+    OPENSSL_free(encrypted);
+
     return (0); //success
 }
 
-int decode_auth_setting(int enable_debug, char *authtoken, EVP_PKEY *private_key, char **username, char **password, time_t *ts){
+int decode_auth_setting(int enable_debug, const char *authtoken, EVP_PKEY *private_key, char **username, char **password, time_t *ts){
     unsigned char *encrypted_b64 = NULL;
     size_t encrypted_len_b64;
-    Base64Decode(authtoken, &encrypted_b64, &encrypted_len_b64);        
+    int64_t utc_seconds;
+    Base64Decode(authtoken, &encrypted_b64, &encrypted_len_b64);
 
     unsigned char *plaintext = NULL;
     int plaintext_len;
     plaintext_len = decrypt_rsa_message(encrypted_b64, encrypted_len_b64, private_key, &plaintext);
+    free(encrypted_b64);
+    if (plaintext_len < 0) {
+        return -1;
+    }
     plaintext[plaintext_len] = '\0';
 
-    char s_username[20], s_password[20];
-    sscanf ((char *)plaintext,"user: %s\npwd:  %s\nts:   %ld", s_username, s_password, ts);
+    char *s_username, *s_password;
+    s_username = (char *) calloc(plaintext_len, sizeof(char));
+    if (s_username == NULL) {
+	return -1;
+    }
+    s_password = (char *) calloc(plaintext_len, sizeof(char));
+    if (s_password == NULL) {
+	free(s_username);
+	return -1;
+    }
+
+    int rc = sscanf((char *) plaintext, auth_text_format, s_username, s_password, &utc_seconds);
+    if (rc != 3) {
+	free(s_password);
+	free(s_username);
+	return -1;
+    }
+
     if (enable_debug) {
         printf("Auth Token Content:\n%s\n", plaintext);
         printf("Auth Token Credentials:\n--> %s %s\n", s_username, s_password);
     }
-    *username = (char *) calloc(21, sizeof(char));
-    *password = (char *) calloc(21, sizeof(char));
-    strncpy(*username, s_username, 20);
-    strncpy(*password, s_password, 20);
+    *username = s_username;
+    *password = s_password;
+    *ts = (time_t)utc_seconds;
+    OPENSSL_free(plaintext);
     return (0);
 }
 
@@ -317,5 +385,3 @@ ssize_t iperf_getpass (char **lineptr, size_t *n, FILE *stream) {
 
     return nread;
 }
-
-
