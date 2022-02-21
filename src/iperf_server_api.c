@@ -697,7 +697,7 @@ iperf_run_server(struct iperf_test *test)
                         FD_CLR(test->prot_listener, &test->read_set);
                         close(test->prot_listener);
                     } else {
-                        if (test->no_delay || test->settings->mss || test->settings->socket_bufsize) {
+                        if ((test->protocol->id != Pdccp) && (test->no_delay || test->settings->mss || test->settings->socket_bufsize)) {
                             FD_CLR(test->listener, &test->read_set);
                             close(test->listener);
 			    test->listener = 0;
