@@ -672,12 +672,12 @@ iperf_run_server(struct iperf_test *test)
                             if (s > test->max_fd) test->max_fd = s;
 
                             /*
-                             * If the protocol isn't UDP, or even if it is but
+                             * If the protocol isn't UDP/DCCP, or even if it is but
                              * we're the receiver, set nonblocking sockets.
                              * We need this to allow a server receiver to
                              * maintain interactivity with the control channel.
                              */
-                            if (test->protocol->id != Pudp ||
+                            if ((test->protocol->id != Pudp && test->protocol->id != Pdccp) ||
                                 !sp->sender) {
                                 setnonblocking(s, 1);
                             }

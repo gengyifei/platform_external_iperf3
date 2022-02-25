@@ -605,8 +605,8 @@ iperf_run_client(struct iperf_test * test)
 	    if (startup) {
 	        startup = 0;
 
-		// Set non-blocking for non-UDP tests
-		if (test->protocol->id != Pudp) {
+		// Set non-blocking for non-UDP and non-DCCP tests
+		if (test->protocol->id != Pudp && test->protocol->id != Pdccp) {
 		    SLIST_FOREACH(sp, &test->streams, streams) {
 			setnonblocking(sp->socket, 1);
 		    }
@@ -650,8 +650,8 @@ iperf_run_client(struct iperf_test * test)
 	         (test->settings->blocks != 0 && (test->blocks_sent >= test->settings->blocks ||
 						  test->blocks_received >= test->settings->blocks)))) {
 
-		// Unset non-blocking for non-UDP tests
-		if (test->protocol->id != Pudp) {
+		// Unset non-blocking for non-UDP and non-DCCP tests
+		if (test->protocol->id != Pudp && test->protocol->id != Pdccp) {
 		    SLIST_FOREACH(sp, &test->streams, streams) {
 			setnonblocking(sp->socket, 0);
 		    }
