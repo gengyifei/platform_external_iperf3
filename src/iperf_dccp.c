@@ -203,8 +203,15 @@ iperf_dccp_send(struct iperf_stream *sp)
 
     r = Nwrite(sp->socket, sp->buffer, size, Pdccp);
 
-    if (r < 0)
-        return r;
+    if (r <= 0) {
+        --sp->packet_count;     /* Don't count messages that no data was sent from them.
+                                 * Allows "resending" a massage with the same numbering */
+        if (r < 0) {
+            if (sp->test->debug)
+                printf("DCCP send failed. errno=%s\n", strerror(errno));
+            return r;
+        }
+    }
 
     sp->result->bytes_sent += r;
     sp->result->bytes_sent_this_interval += r;
